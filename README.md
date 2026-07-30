@@ -1,4 +1,4 @@
-# SIAKAD Smart Campus (PHP Native Version)
+# SIAKAD Smart-Campus-Ardikamal
 
 Sistem Informasi Akademik (SIAKAD) berbasis web untuk **Universitas Bale Bandung (UNIBBA)**. 
 Aplikasi ini sebelumnya dibangun menggunakan Next.js, namun kini telah dimigrasi/dirombak menjadi versi **PHP Native** (tanpa framework) dengan antarmuka **AdminLTE / Bootstrap** sesuai dengan kebutuhan terbaru.
