@@ -1,0 +1,246 @@
+// ============================================================================
+// SIAKAD SMART CAMPUS — Prisma Schema
+// Universitas Bale Bandung (UNIBBA)
+//
+// Design notes:
+// - `User` holds only auth-level data (credentials + role). `Admin` and
+//   `Student` hold profile data and each has a 1-1 relation back to `User`.
+//   This keeps authentication logic decoupled from profile/academic data.
+// - All primary keys use `cuid()` — sortable-ish, collision-resistant,
+//   and don't leak sequential row counts the way autoincrement ints do.
+// - Money/GPA-relevant numbers use `Float`; for a real production system
+//   handling financial data you'd reach for `Decimal`, but grades in the
+//   Indonesian 0-100 / bobot 0-4 scale are fine as floats.
+// ============================================================================
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+// ----------------------------------------------------------------------------
+// Enums
+// ----------------------------------------------------------------------------
+
+enum Role {
+  ADMIN
+  MAHASISWA
+}
+
+enum StatusAkademik {
+  AKTIF
+  CUTI
+  LULUS
+  DROP_OUT
+}
+
+enum StatusKrs {
+  DIAJUKAN
+  DISETUJUI
+  DITOLAK
+}
+
+enum SemesterType {
+  GANJIL
+  GENAP
+}
+
+enum HariKuliah {
+  SENIN
+  SELASA
+  RABU
+  KAMIS
+  JUMAT
+  SABTU
+}
+
+// ----------------------------------------------------------------------------
+// Auth
+// ----------------------------------------------------------------------------
+
+/// Base authentication record. Every login — admin or mahasiswa — is a User.
+model User {
+  id           String   @id @default(cuid())
+  role         Role
+  passwordHash String
+  isActive     Boolean  @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  admin        Admin?
+  student      Student?
+  activityLogs ActivityLog[]
+
+  @@index([role])
+  @@map("users")
+}
+
+model Admin {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  username  String   @unique
+  fullName  String
+  photoUrl  String?  @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("admins")
+}
+
+model Student {
+  id             String         @id @default(cuid())
+  userId         String         @unique
+  nim            String         @unique
+  fullName       String
+  prodi          String
+  angkatan       Int
+  photoUrl       String?        @db.Text
+  statusAkademik StatusAkademik @default(AKTIF)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  krsList        Krs[]
+  grades         Grade[]
+
+  @@index([prodi])
+  @@index([angkatan])
+  @@map("students")
+}
+
+/// Singleton (satu baris) — profil kampus yang ditampilkan di menu Pengaturan admin.
+model CampusProfile {
+  id            String   @id @default(cuid())
+  namaKampus    String
+  namaSingkatan String
+  alamat        String   @db.Text
+  telepon       String?
+  email         String?
+  updatedAt     DateTime @updatedAt
+
+  @@map("campus_profile")
+}
+
+// ----------------------------------------------------------------------------
+// Academic structure
+// ----------------------------------------------------------------------------
+
+model AcademicYear {
+  id        String       @id @default(cuid())
+  tahun     String       // e.g. "2025/2026"
+  semester  SemesterType
+  isActive  Boolean      @default(false)
+  createdAt DateTime     @default(now())
+
+  krsList   Krs[]
+  grades    Grade[]
+
+  @@unique([tahun, semester])
+  @@map("academic_years")
+}
+
+model Course {
+  id        String   @id @default(cuid())
+  kode      String   @unique
+  nama      String
+  sks       Int
+  semester  Int      // semester kurikulum mata kuliah ini ditawarkan (1-8)
+  dosen     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  krsList   Krs[]
+  grades    Grade[]
+  schedules Schedule[]
+
+  @@map("courses")
+}
+
+model Schedule {
+  id         String     @id @default(cuid())
+  courseId   String
+  hari       HariKuliah
+  jamMulai   String     // "08:00"
+  jamSelesai String     // "10:30"
+  ruangan    String
+  createdAt  DateTime   @default(now())
+
+  course     Course     @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@index([hari])
+  @@map("schedules")
+}
+
+// ----------------------------------------------------------------------------
+// Transactional academic records
+// ----------------------------------------------------------------------------
+
+model Krs {
+  id             String       @id @default(cuid())
+  studentId      String
+  courseId       String
+  academicYearId String
+  status         StatusKrs    @default(DIAJUKAN)
+  createdAt      DateTime     @default(now())
+
+  student        Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  course         Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  academicYear   AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, courseId, academicYearId])
+  @@map("krs")
+}
+
+model Grade {
+  id             String       @id @default(cuid())
+  studentId      String
+  courseId       String
+  academicYearId String
+  nilaiAngka     Float        // 0-100
+  nilaiHuruf     String       // A, AB, B, BC, C, CD, D, E
+  bobot          Float        // 0.0-4.0
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  student        Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  course         Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  academicYear   AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, courseId, academicYearId])
+  @@map("grades")
+}
+
+// ----------------------------------------------------------------------------
+// Content & system
+// ----------------------------------------------------------------------------
+
+model Announcement {
+  id        String   @id @default(cuid())
+  judul     String
+  konten    String   @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("announcements")
+}
+
+model ActivityLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  action      String   // e.g. "LOGIN", "CREATE_STUDENT", "UPDATE_GRADE"
+  description String
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@map("activity_logs")
+}
