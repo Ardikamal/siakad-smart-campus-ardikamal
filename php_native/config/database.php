@@ -1,7 +1,6 @@
 <?php
-session_start();
 
-$host = 'localhost';
+$host = '127.0.0.1';
 $dbname = 'siakad_native'; // Change to your database name
 $username = 'root'; // Change to your DB username
 $password = ''; // Change to your DB password
